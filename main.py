@@ -14,7 +14,7 @@ app = FastAPI(title="Acme Appliances Ledger Q&A")
 
 
 # ============================================================
-# CONFIGURATION
+# CONFIG
 # ============================================================
 
 LEDGER_URL = os.environ.get(
@@ -26,11 +26,13 @@ LEDGER_URL = os.environ.get(
     "&path=%2Fexport"
 )
 
+
 RATES = {
     "USD": 1.0,
     "EUR": 1.04,
     "INR": 0.01162,
 }
+
 
 MONTHS = {
     "january": 1,
@@ -47,10 +49,16 @@ MONTHS = {
     "december": 12,
 }
 
+
 PRODUCT_ALIASES = {
     "rice cooker": ["rice cooker", "rice cookers"],
     "air fryer": ["air fryer", "air fryers"],
-    "refrigerator": ["refrigerator", "refrigerators", "fridge", "fridges"],
+    "refrigerator": [
+        "refrigerator",
+        "refrigerators",
+        "fridge",
+        "fridges",
+    ],
     "washing machine": [
         "washing machine",
         "washing machines",
@@ -62,12 +70,10 @@ PRODUCT_ALIASES = {
     "blender": ["blender", "blenders"],
     "toaster": ["toaster", "toasters"],
     "kettle": ["kettle", "kettles"],
+    "grinder": ["grinder", "grinders"],
+    "juicer": ["juicer", "juicers"],
 }
 
-
-# ============================================================
-# DATA STORAGE
-# ============================================================
 
 ORDERS = []
 DATA_ERROR = None
@@ -79,11 +85,10 @@ class Question(BaseModel):
 
 
 # ============================================================
-# HELPERS
+# BASIC HELPERS
 # ============================================================
 
 def parse_time(value):
-    """Convert an API timestamp into a timezone-aware datetime."""
     if not value:
         return datetime.min.replace(tzinfo=timezone.utc)
 
@@ -99,6 +104,7 @@ def parse_time(value):
             dt = dt.replace(tzinfo=timezone.utc)
 
         return dt
+
     except Exception:
         return datetime.min.replace(tzinfo=timezone.utc)
 
@@ -112,32 +118,48 @@ def normalize_text(value):
 
 def money_usd(order):
     amount = float(order.get("amount", 0) or 0)
-    currency = str(order.get("currency", "USD")).upper()
+
+    currency = str(
+        order.get("currency", "USD")
+    ).upper()
 
     rate = RATES.get(currency)
 
     if rate is None:
-        raise ValueError(f"Unknown currency: {currency}")
+        raise ValueError(
+            f"Unknown currency: {currency}"
+        )
 
     return amount * rate
 
 
 def is_paid(order):
-    return normalize_text(order.get("status", "")) == "paid"
+    return (
+        normalize_text(order.get("status", ""))
+        == "paid"
+    )
 
 
 def is_refund(order):
-    status = normalize_text(order.get("status", ""))
+    status = normalize_text(
+        order.get("status", "")
+    )
 
     return (
         "refund" in status
         or "return" in status
-        or status in {"refunded", "refund", "returned"}
+        or status in {
+            "refunded",
+            "refund",
+            "returned",
+        }
     )
 
 
 def order_date(order):
-    return parse_time(order.get("created_at"))
+    return parse_time(
+        order.get("created_at")
+    )
 
 
 # ============================================================
@@ -162,8 +184,9 @@ def fetch_orders():
 
     orders = []
 
-    # The /export endpoint returns NDJSON.
+    # Export is normally NDJSON.
     for line in text.splitlines():
+
         line = line.strip()
 
         if not line:
@@ -174,30 +197,42 @@ def fetch_orders():
         try:
             obj = json.loads(line)
 
-            if isinstance(obj, dict) and "id" in obj:
+            if (
+                isinstance(obj, dict)
+                and "id" in obj
+            ):
                 orders.append(obj)
 
         except json.JSONDecodeError:
-            # In case the endpoint ever returns one JSON array.
             continue
 
-    # Fallback if the endpoint returned a normal JSON array.
+    # Fallback if the endpoint returns normal JSON.
     if not orders:
+
         try:
             data = json.loads(text)
 
             if isinstance(data, list):
+
                 orders = [
-                    x for x in data
+                    x
+                    for x in data
                     if isinstance(x, dict)
                 ]
 
-            elif isinstance(data, dict):
-                if isinstance(data.get("orders"), list):
-                    orders = [
-                        x for x in data["orders"]
-                        if isinstance(x, dict)
-                    ]
+            elif (
+                isinstance(data, dict)
+                and isinstance(
+                    data.get("orders"),
+                    list
+                )
+            ):
+
+                orders = [
+                    x
+                    for x in data["orders"]
+                    if isinstance(x, dict)
+                ]
 
         except Exception:
             pass
@@ -206,15 +241,10 @@ def fetch_orders():
 
 
 def deduplicate_orders(orders):
-    """
-    The API explicitly says:
-    an order ID may occur more than once;
-    the row with the latest updated_at is current.
-    """
-
     current = {}
 
     for order in orders:
+
         order_id = order.get("id")
 
         if not order_id:
@@ -225,7 +255,9 @@ def deduplicate_orders(orders):
             continue
 
         old_time = parse_time(
-            current[order_id].get("updated_at")
+            current[order_id].get(
+                "updated_at"
+            )
         )
 
         new_time = parse_time(
@@ -239,24 +271,33 @@ def deduplicate_orders(orders):
 
 
 def load_ledger():
-    global ORDERS, DATA_ERROR
+
+    global ORDERS
+    global DATA_ERROR
 
     with DATA_LOCK:
+
         try:
+
             raw = fetch_orders()
-            ORDERS = deduplicate_orders(raw)
+
+            ORDERS = deduplicate_orders(
+                raw
+            )
+
             DATA_ERROR = None
+
         except Exception as exc:
+
             DATA_ERROR = str(exc)
 
-            # Don't destroy already-loaded data if a later refresh fails.
             if not ORDERS:
                 ORDERS = []
 
     return ORDERS
 
 
-# Load once when the application starts.
+# Load when server starts.
 load_ledger()
 
 
@@ -265,7 +306,11 @@ load_ledger()
 # ============================================================
 
 def extract_year(question):
-    match = re.search(r"\b(20\d{2})\b", question)
+
+    match = re.search(
+        r"\b(20\d{2})\b",
+        question
+    )
 
     if match:
         return int(match.group(1))
@@ -274,37 +319,50 @@ def extract_year(question):
 
 
 def extract_month(question):
+
     q = normalize_text(question)
 
     for name, number in MONTHS.items():
-        if re.search(r"\b" + name + r"\b", q):
+
+        if re.search(
+            r"\b" + name + r"\b",
+            q
+        ):
             return number
 
     return None
 
 
 def extract_region(question):
+
     q = normalize_text(question)
 
-    regions = [
+    for region in [
         "north",
         "south",
         "east",
         "west",
         "central",
-    ]
+    ]:
 
-    for region in regions:
-        if re.search(r"\b" + region + r"\b", q):
+        if re.search(
+            r"\b" + region + r"\b",
+            q
+        ):
             return region
 
     return None
 
 
 def extract_customer(question):
+
     q = normalize_text(question)
 
-    match = re.search(r"\bc\d{3,6}\b", q)
+    # Handles IDs such as C1001, C12345, etc.
+    match = re.search(
+        r"\bc\d{3,8}\b",
+        q
+    )
 
     if match:
         return match.group(0).upper()
@@ -313,60 +371,35 @@ def extract_customer(question):
 
 
 def extract_product(question):
+
     q = normalize_text(question)
 
-    # Longest aliases first.
-    aliases = []
+    candidates = []
 
     for canonical, variants in PRODUCT_ALIASES.items():
+
         for variant in variants:
-            aliases.append((variant, canonical))
 
-    aliases.sort(key=lambda x: len(x[0]), reverse=True)
+            candidates.append(
+                (variant, canonical)
+            )
 
-    for variant, canonical in aliases:
+    # Longest first.
+    candidates.sort(
+        key=lambda x: len(x[0]),
+        reverse=True
+    )
+
+    for variant, canonical in candidates:
+
         if variant in q:
             return canonical
 
     return None
 
 
-def extract_currency(question):
-    q = normalize_text(question)
-
-    if (
-        "usd" in q
-        or "us dollars" in q
-        or "us dollar" in q
-        or "dollar" in q
-        or "$" in q
-    ):
-        return "USD"
-
-    if (
-        "eur" in q
-        or "euro" in q
-        or "euros" in q
-    ):
-        return "EUR"
-
-    if (
-        "inr" in q
-        or "rupee" in q
-        or "rupees" in q
-        or "₹" in q
-    ):
-        return "INR"
-
-    # The grader examples/questions generally ask for USD.
-    return "USD"
-
-
-# ============================================================
-# FILTERING
-# ============================================================
-
 def filter_orders(question):
+
     q = normalize_text(question)
 
     result = list(ORDERS)
@@ -378,60 +411,99 @@ def filter_orders(question):
     product = extract_product(q)
 
     if year is not None:
+
         result = [
-            o for o in result
+            o
+            for o in result
             if order_date(o).year == year
         ]
 
     if month is not None:
+
         result = [
-            o for o in result
+            o
+            for o in result
             if order_date(o).month == month
         ]
 
     if region is not None:
+
         result = [
-            o for o in result
-            if normalize_text(o.get("region", "")) == region
+            o
+            for o in result
+            if normalize_text(
+                o.get("region", "")
+            ) == region
         ]
 
     if customer is not None:
+
         result = [
-            o for o in result
-            if str(o.get("customer", "")).upper() == customer
+            o
+            for o in result
+            if str(
+                o.get("customer", "")
+            ).upper()
+            == customer
         ]
 
     if product is not None:
+
         result = [
-            o for o in result
-            if normalize_text(o.get("product", "")) == product
+            o
+            for o in result
+            if normalize_text(
+                o.get("product", "")
+            )
+            == product
         ]
 
     return result
 
 
 # ============================================================
-# INTENT DETECTION
+# QUESTION TYPES
 # ============================================================
 
 def wants_average(q):
+
     return (
         "average" in q
         or "avg" in q
         or "mean" in q
+        or "on average" in q
+    )
+
+
+def wants_unique_customers(q):
+
+    return (
+        "different customers" in q
+        or "unique customers" in q
+        or "distinct customers" in q
+        or "how many customers" in q
+        or "number of customers" in q
+        or "customer count" in q
+        or "customers placed" in q
+        or "customers made" in q
+        or "customers who" in q
     )
 
 
 def wants_count(q):
+
     return (
         "how many orders" in q
         or "number of orders" in q
         or "order count" in q
         or "count of orders" in q
+        or "orders were" in q
+        or "orders placed" in q
     )
 
 
 def wants_units(q):
+
     return (
         "how many units" in q
         or "number of units" in q
@@ -439,10 +511,12 @@ def wants_units(q):
         or "quantity sold" in q
         or "total quantity" in q
         or "quantity" in q
+        or "units" in q
     )
 
 
 def wants_revenue(q):
+
     return any(
         phrase in q
         for phrase in [
@@ -453,11 +527,14 @@ def wants_revenue(q):
             "income",
             "earned",
             "turnover",
+            "worth",
+            "value",
         ]
     )
 
 
 def wants_refund(q):
+
     return (
         "refund" in q
         or "refunded" in q
@@ -467,21 +544,12 @@ def wants_refund(q):
     )
 
 
-def wants_product_breakdown(q):
-    return (
-        "by product" in q
-        or "per product" in q
-        or "product-wise" in q
-        or "product wise" in q
-    )
+def wants_paid(q):
 
-
-def wants_customer_breakdown(q):
     return (
-        "by customer" in q
-        or "per customer" in q
-        or "customer-wise" in q
-        or "customer wise" in q
+        "paid" in q
+        or "successful" in q
+        or "completed" in q
     )
 
 
@@ -490,12 +558,15 @@ def wants_customer_breakdown(q):
 # ============================================================
 
 def answer_question(question):
+
     q = normalize_text(question)
 
     if not ORDERS:
+
         if DATA_ERROR:
             raise RuntimeError(
-                "Ledger data could not be loaded: " + DATA_ERROR
+                "Ledger data could not be loaded: "
+                + DATA_ERROR
             )
 
         return 0
@@ -503,46 +574,95 @@ def answer_question(question):
     filtered = filter_orders(q)
 
     # --------------------------------------------------------
+    # UNIQUE CUSTOMERS
+    # --------------------------------------------------------
+
+    if wants_unique_customers(q):
+
+        paid = [
+            o
+            for o in filtered
+            if is_paid(o)
+        ]
+
+        customers = {
+            str(
+                o.get("customer", "")
+            )
+            .strip()
+            .upper()
+
+            for o in paid
+
+            if o.get("customer")
+        }
+
+        return len(customers)
+
+    # --------------------------------------------------------
     # REFUNDS
     # --------------------------------------------------------
 
     if wants_refund(q):
+
         refunds = [
-            o for o in filtered
+            o
+            for o in filtered
             if is_refund(o)
         ]
 
+        if wants_unique_customers(q):
+
+            customers = {
+                str(
+                    o.get("customer", "")
+                )
+                .strip()
+                .upper()
+
+                for o in refunds
+
+                if o.get("customer")
+            }
+
+            return len(customers)
+
         if wants_count(q):
+
             return len(refunds)
 
         if wants_units(q):
+
             return sum(
-                int(o.get("qty", 0) or 0)
+                int(
+                    o.get("qty", 0) or 0
+                )
                 for o in refunds
             )
 
-        total = sum(
-            money_usd(o)
-            for o in refunds
+        return round(
+            sum(
+                money_usd(o)
+                for o in refunds
+            ),
+            2
         )
-
-        return round(total, 2)
 
     # --------------------------------------------------------
     # AVERAGE PAID ORDER VALUE
     # --------------------------------------------------------
 
     if wants_average(q):
+
         paid = [
-            o for o in filtered
+            o
+            for o in filtered
             if is_paid(o)
         ]
 
         if not paid:
             return 0
 
-        # "average paid order value" means
-        # average monetary value of each paid order.
         values = [
             money_usd(o)
             for o in paid
@@ -558,9 +678,12 @@ def answer_question(question):
     # --------------------------------------------------------
 
     if wants_count(q):
-        if "paid" in q:
+
+        if wants_paid(q):
+
             return sum(
-                1 for o in filtered
+                1
+                for o in filtered
                 if is_paid(o)
             )
 
@@ -571,59 +694,70 @@ def answer_question(question):
     # --------------------------------------------------------
 
     if wants_units(q):
-        if "paid" in q:
+
+        if wants_paid(q):
+
             return sum(
-                int(o.get("qty", 0) or 0)
+                int(
+                    o.get("qty", 0) or 0
+                )
                 for o in filtered
                 if is_paid(o)
             )
 
         return sum(
-            int(o.get("qty", 0) or 0)
+            int(
+                o.get("qty", 0) or 0
+            )
             for o in filtered
         )
 
     # --------------------------------------------------------
-    # REVENUE / SALES
+    # REVENUE
     # --------------------------------------------------------
 
     if wants_revenue(q):
+
         paid = [
-            o for o in filtered
+            o
+            for o in filtered
             if is_paid(o)
         ]
 
-        total = sum(
-            money_usd(o)
-            for o in paid
+        return round(
+            sum(
+                money_usd(o)
+                for o in paid
+            ),
+            2
         )
 
-        return round(total, 2)
-
     # --------------------------------------------------------
-    # PRODUCT/CUSTOMER DEFAULT TOTALS
+    # DEFAULT
     # --------------------------------------------------------
 
-    # If a question mentions a product/customer/region but
-    # doesn't explicitly say what metric, revenue is generally
-    # the most useful default.
     paid = [
-        o for o in filtered
+        o
+        for o in filtered
         if is_paid(o)
     ]
 
     return round(
-        sum(money_usd(o) for o in paid),
+        sum(
+            money_usd(o)
+            for o in paid
+        ),
         2
     )
 
 
 # ============================================================
-# API ENDPOINTS
+# API ROUTES
 # ============================================================
 
 @app.get("/")
 def home():
+
     return {
         "service": "Acme Appliances ledger Q&A",
         "status": "ok",
@@ -633,6 +767,7 @@ def home():
 
 @app.get("/health")
 def health():
+
     return {
         "status": "ok",
         "orders_loaded": len(ORDERS),
@@ -642,60 +777,60 @@ def health():
 
 @app.get("/debug")
 def debug():
+
     return {
         "orders_loaded": len(ORDERS),
         "data_error": DATA_ERROR,
-        "regions": sorted(
-            {
-                str(o.get("region"))
-                for o in ORDERS
-                if o.get("region") is not None
-            }
-        ),
-        "products": sorted(
-            {
-                str(o.get("product"))
-                for o in ORDERS
-                if o.get("product") is not None
-            }
-        ),
-        "currencies": sorted(
-            {
-                str(o.get("currency"))
-                for o in ORDERS
-                if o.get("currency") is not None
-            }
-        ),
-        "statuses": sorted(
-            {
-                str(o.get("status"))
-                for o in ORDERS
-                if o.get("status") is not None
-            }
-        ),
+
+        "regions": sorted({
+            str(o.get("region"))
+            for o in ORDERS
+            if o.get("region") is not None
+        }),
+
+        "products": sorted({
+            str(o.get("product"))
+            for o in ORDERS
+            if o.get("product") is not None
+        }),
+
+        "currencies": sorted({
+            str(o.get("currency"))
+            for o in ORDERS
+            if o.get("currency") is not None
+        }),
+
+        "statuses": sorted({
+            str(o.get("status"))
+            for o in ORDERS
+            if o.get("status") is not None
+        }),
     }
 
 
 @app.post("/")
 def ask(question: Question):
+
     return {
-        "answer": answer_question(question.question)
+        "answer": answer_question(
+            question.question
+        )
     }
 
 
 @app.post("/ask")
 def ask_alias(question: Question):
+
     return {
-        "answer": answer_question(question.question)
+        "answer": answer_question(
+            question.question
+        )
     }
 
 
-# ============================================================
-# OPTIONAL MANUAL REFRESH
-# ============================================================
-
 @app.post("/refresh")
 def refresh():
+
     load_ledger()
 
     return {
