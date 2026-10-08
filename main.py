@@ -200,14 +200,18 @@ def answer_question(question):
     if "order count" in q or "how many orders" in q or "number of orders" in q:
         return len(filtered)
 
-    # Average
+    # Average paid order value
     if "average" in q or "avg" in q:
-        if not filtered:
+        paid = [
+            o for o in filtered
+            if o.get("status", "").lower() == "paid"
+        ]
+
+        if not paid:
             return 0
 
-        values = [usd_amount(o) for o in filtered]
+        values = [usd_amount(o) for o in paid]
         return round(sum(values) / len(values), 2)
-
     # Default to paid revenue
     paid = [
         o for o in filtered
